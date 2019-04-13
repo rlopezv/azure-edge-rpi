@@ -1,13 +1,15 @@
 import random
 import time
 import sys
+import threading
+import uuid
 import iothub_client
 from sense_hat import SenseHat
 import datetime
 import json
 # pylint: disable=E0611
 from iothub_client import IoTHubModuleClient, IoTHubClientError, IoTHubTransportProvider
-from iothub_client import IoTHubMessage, IoTHubMessageDispositionResult, IoTHubError
+from iothub_client import IoTHubMessage, IoTHubMessageDispositionResult, IoTHubError, DeviceMethodReturnValue
 
 # messageTimeout - the maximum time in milliseconds until a message times out.
 # The timeout period starts at IoTHubModuleClient.send_event_async.
@@ -17,22 +19,38 @@ MESSAGE_TIMEOUT = 10000
 #Message sample rate in seconds
 MESSAGE_SAMPLE = 60
 
+RED = (255, 0, 0)
+GREEN = (0,255,0)
+BLUE = (0,0,255)
+
 # global counters
+RECEIVE_CONTEXT = 0
 RECEIVE_CALLBACKS = 0
 SEND_CALLBACKS = 0
 SEND_SENSEHAT_CALLBACKS = 0
+
+DEVICE_CLIENT_RESPONSE = ""
+DEVICE_MESSAGE_TIMEOUT = 10000
+DEVICE_METHOD_TIMEOUT = 60
+DEVICE_METHOD_USER_CONTEXT = 42
+DEVICE_METHOD_NAME = "e2e_device_method_name"
+DEVICE_METHOD_PAYLOAD = "\"I'm a happy little string for python E2E test\""
+DEVICE_METHOD_RESPONSE_PREFIX = "e2e_test_response-"
+DEVICE_METHOD_EVENT = threading.Event()
+DEVICE_METHOD_CALLBACK_COUNTER = 0
+
 
 # Recover from context
 DEVICE_ID= "g5-iotedge-rpi"
 # Choose HTTP, AMQP or MQTT as transport protocol.  Currently only MQTT is supported.
 PROTOCOL = IoTHubTransportProvider.MQTT
 
+sense = SenseHat()
 
 # read sense hat and send
 def read_and_send_measurements_from_sensehat(hubManager):
     global SEND_SENSEHAT_CALLBACKS
-    sense = SenseHat()
-    sense.clear()
+    sense.clear(BLUE)  # passing in an RGB tuple
     temperature = sense.get_temperature()
     temperature_h = sense.get_temperature_from_humidity()
     temperature_p = sense.get_temperature_from_pressure()
@@ -44,7 +62,7 @@ def read_and_send_measurements_from_sensehat(hubManager):
     message = IoTHubMessage(msg_txt_formatted)
     hubManager.forward_event_to_output("output2", message, 0)
     SEND_SENSEHAT_CALLBACKS += 1
-    time.sleep(MESSAGE_SAMPLE)
+    sense.clear()
     print ( "    Total messages sent: %d" % SEND_SENSEHAT_CALLBACKS )
 
 # Callback received when the message that we're forwarding is processed.
@@ -57,13 +75,13 @@ def send_confirmation_callback(message, result, user_context):
     SEND_CALLBACKS += 1
     print ( "    Total calls confirmed: %d" % SEND_CALLBACKS )
 
-
 # receive_message_callback is invoked when an incoming message arrives on the specified 
 # input queue (in the case of this sample, "input1").  Because this is a filter module, 
 # we will forward this message onto the "output1" queue.
 def receive_message_callback(message, hubManager):
     global RECEIVE_CALLBACKS
     message_buffer = message.get_bytearray()
+    sense.clear(GREEN)
     size = len(message_buffer)
     print ( "    Data: <<<%s>>> & Size=%d" % (message_buffer[:size].decode('utf-8'), size) )
     map_properties = message.properties()
@@ -75,6 +93,28 @@ def receive_message_callback(message, hubManager):
     return IoTHubMessageDispositionResult.ACCEPTED
 
 
+def device_method_callback(method_name, payload, user_context):
+    global DEVICE_METHOD_USER_CONTEXT
+    global DEVICE_CLIENT_RESPONSE
+    global DEVICE_METHOD_CALLBACK_COUNTER
+    sense.clear(GREEN)
+    print ( "Method callback called with:" )
+    print ( "   methodName = {0}".format(method_name) )
+    print ( "   payload = {0}".format(payload) )
+    print ( "   context = {0}".format(user_context) )
+
+    device_method_return_value = DeviceMethodReturnValue()
+    device_method_return_value.response = "{ \"Response\": \"+DEVICE_ID+\" }"
+    device_method_return_value.status = 200
+    print ( "" )
+
+    DEVICE_METHOD_CALLBACK_COUNTER += 1
+    print ( "Total calls received: {0}".format(DEVICE_METHOD_CALLBACK_COUNTER) )
+    print ( "" )
+    #DEVICE_METHOD_EVENT.set()
+
+    return device_method_return_value
+
 class HubManager(object):
 
     def __init__(
@@ -83,14 +123,13 @@ class HubManager(object):
         self.client_protocol = protocol
         self.client = IoTHubModuleClient()
         self.client.create_from_environment(protocol)
-
         # set the time until a message times out
         self.client.set_option("messageTimeout", MESSAGE_TIMEOUT)
         
         # sets the callback when a message arrives on "input1" queue.  Messages sent to 
         # other inputs or to the default will be silently discarded.
         self.client.set_message_callback("input1", receive_message_callback, self)
-
+        self.client.set_module_method_callback(device_method_callback, None)
     # Forwards the message received onto the next stage in the process.
     def forward_event_to_output(self, outputQueueName, event, send_context):
         self.client.send_event_async(
@@ -102,13 +141,12 @@ def main(protocol):
         print ( "IoT Hub Client" )
 
         hub_manager = HubManager(protocol)
-
         print ( "Starting the IoT Hub using protocol %s..." % hub_manager.client_protocol )
         print ( "Now waiting for messages and will indefinitely.  Press Ctrl-C to exit. ")
 
         while True:
             read_and_send_measurements_from_sensehat(hub_manager)
-            time.sleep(1)
+            time.sleep(MESSAGE_SAMPLE)
 
     except IoTHubError as iothub_error:
         print ( "Unexpected error %s from IoTHub" % iothub_error )
