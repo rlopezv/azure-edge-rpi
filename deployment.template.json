@@ -27,7 +27,7 @@
           "edgeAgent": {
             "type": "docker",
             "settings": {
-              "image": "mcr.microsoft.com/azureiotedge-agent:1.0.6",
+              "image": "mcr.microsoft.com/azureiotedge-agent:1.0.5-linux-arm32v7",
               "createOptions": {}
             }
           },
@@ -36,7 +36,7 @@
             "status": "running",
             "restartPolicy": "always",
             "settings": {
-              "image": "mcr.microsoft.com/azureiotedge-hub:1.0.6",
+              "image": "mcr.microsoft.com/azureiotedge-hub:1.0.5-linux-arm32v7",
               "createOptions": {
                 "HostConfig": {
                   "PortBindings": {
@@ -67,16 +67,6 @@
           }
         },
         "modules": {
-          "tempSensor": {
-            "version": "1.0",
-            "type": "docker",
-            "status": "running",
-            "restartPolicy": "always",
-            "settings": {
-              "image": "mcr.microsoft.com/azureiotedge-simulated-temperature-sensor:1.0",
-              "createOptions": {}
-            }
-          },
           "sensehatModule": {
             "version": "1.0",
             "type": "docker",
@@ -85,20 +75,10 @@
             "settings": {
               "image": "${MODULES.sensehatModule.arm32v7}",
               "createOptions": "{\"HostConfig\":{\"Privileged\": true}}"
-            }
-          },
-          "nodered": {
-            "version": "1.0",
-            "type": "docker",
-            "status": "running",
-            "restartPolicy": "always",
-            "settings": {
-              "image": "miotcciotg5/azureedgedashboard:0.0.2-arm32v7",
-              "createOptions": "{\"HostConfig\":{\"Privileged\":true,\"PortBindings\":{\"1880/tcp\":[{\"HostPort\":\"1880\"}]}}}"
             },
             "env": {
               "OptimizeForPerformance": {
-                  "value": "false"
+                "value": "false"
               }
             }
           }
@@ -109,9 +89,7 @@
       "properties.desired": {
         "schemaVersion": "1.0",
         "routes": {
-          "sensehatModuleToIoTHub": "FROM /messages/modules/sensehatModule/outputs/* INTO $upstream",
-          "sensorTosensehatModule": "FROM /messages/modules/tempSensor/outputs/temperatureOutput INTO BrokeredEndpoint(\"/modules/sensehatModule/inputs/input1\")",
-          "sensorToRed": "FROM /messages/modules/sensehatModule/outputs/* INTO BrokeredEndpoint(\"/modules/nodered/inputs/input1\")"
+          "sensehatModuleToIoTHub": "FROM /messages/modules/sensehatModule/outputs/* INTO $upstream"
         },
         "storeAndForwardConfiguration": {
           "timeToLiveSecs": 7200
