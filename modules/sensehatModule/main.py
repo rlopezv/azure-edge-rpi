@@ -17,11 +17,12 @@ from iothub_client import IoTHubMessage, IoTHubMessageDispositionResult, IoTHubE
 MESSAGE_TIMEOUT = 10000
 
 #Message sample rate in seconds
-MESSAGE_SAMPLE = 60
+MESSAGE_SAMPLE = 10
 
 RED = (255, 0, 0)
 GREEN = (0,255,0)
 BLUE = (0,0,255)
+
 
 # global counters
 RECEIVE_CONTEXT = 0
@@ -45,7 +46,9 @@ DEVICE_ID= "g5-iotedge-rpi"
 # Choose HTTP, AMQP or MQTT as transport protocol.  Currently only MQTT is supported.
 PROTOCOL = IoTHubTransportProvider.MQTT
 
+#Message sending status
 sense = SenseHat()
+messageSending = True
 
 # read sense hat and send
 def read_and_send_measurements_from_sensehat(hubManager):
@@ -93,27 +96,28 @@ def receive_message_callback(message, hubManager):
     return IoTHubMessageDispositionResult.ACCEPTED
 
 
-def device_method_callback(method_name, payload, user_context):
-    global DEVICE_METHOD_USER_CONTEXT
-    global DEVICE_CLIENT_RESPONSE
-    global DEVICE_METHOD_CALLBACK_COUNTER
-    sense.clear(GREEN)
-    print ( "Method callback called with:" )
-    print ( "   methodName = {0}".format(method_name) )
-    print ( "   payload = {0}".format(payload) )
-    print ( "   context = {0}".format(user_context) )
-
-    device_method_return_value = DeviceMethodReturnValue()
-    device_method_return_value.response = "{ \"Response\": \"+DEVICE_ID+\" }"
-    device_method_return_value.status = 200
-    print ( "" )
-
-    DEVICE_METHOD_CALLBACK_COUNTER += 1
-    print ( "Total calls received: {0}".format(DEVICE_METHOD_CALLBACK_COUNTER) )
-    print ( "" )
-    #DEVICE_METHOD_EVENT.set()
-
-    return device_method_return_value
+# This function will be called every time a method request is received
+def method_callback(method_name, payload, user_context):
+    global messageSending
+    global sense
+    print('received method call:')
+    print('\tmethod name:', method_name)
+    print('\tpayload:', str(payload))
+    if "start" == method_name:
+        print('\tStarting sendind measures')
+        messageSending = True
+    elif "stop" == method_name:
+        print('\tStoping sendind measures')
+        messageSending = False
+    elif "alert" == method_name:
+        print('\tAlert recieved')
+        sense.show_message("Alert")
+    else:
+        print('\tUnknown method')    
+    retval = DeviceMethodReturnValue()
+    retval.status = 200
+    retval.response = "{\"Message received\":\"value\"}"
+    return retval
 
 class HubManager(object):
 
@@ -129,7 +133,9 @@ class HubManager(object):
         # sets the callback when a message arrives on "input1" queue.  Messages sent to 
         # other inputs or to the default will be silently discarded.
         self.client.set_message_callback("input1", receive_message_callback, self)
-        self.client.set_module_method_callback(device_method_callback, None)
+        print('subscribing to method calls')
+        # Register the callback with the client
+        self.client.set_module_method_callback(method_callback, 0)
     # Forwards the message received onto the next stage in the process.
     def forward_event_to_output(self, outputQueueName, event, send_context):
         self.client.send_event_async(
@@ -145,7 +151,8 @@ def main(protocol):
         print ( "Now waiting for messages and will indefinitely.  Press Ctrl-C to exit. ")
 
         while True:
-            read_and_send_measurements_from_sensehat(hub_manager)
+            if messageSending:
+                read_and_send_measurements_from_sensehat(hub_manager)
             time.sleep(MESSAGE_SAMPLE)
 
     except IoTHubError as iothub_error:
